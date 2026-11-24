@@ -1,4 +1,4 @@
-//! Mirror Lab: play with mirrors, chirality and enantiomorphs.
+//! Catoptroscopus (Mirror Lab): play with mirrors, chirality and enantiomorphs.
 
 mod app2d;
 mod app3d;
@@ -17,7 +17,7 @@ use ui::*;
 
 fn window_conf() -> Conf {
     Conf {
-        window_title: "Mirror Lab - chirality & enantiomorphs".to_owned(),
+        window_title: "Catoptroscopus - Mirror Lab".to_owned(),
         window_width: 1360,
         window_height: 800,
         sample_count: 4,
@@ -103,8 +103,8 @@ async fn main() {
         }
         side_scroll = side_scroll.clamp(0.0, over);
         let mut ui = Ui::new(16.0, 14.0 - side_scroll, SIDEBAR_W - 32.0);
-        ui.label("MIRROR LAB", 28.0, TEXT);
-        ui.label("chirality & enantiomorphs", 15.0, DIM);
+        ui.label("CATOPTROSCOPUS", 28.0, TEXT);
+        ui.label("Mirror Lab: chirality & enantiomorphs", 15.0, DIM);
         ui.space(6.0);
         let modes = [Mode::Shapes2D, Mode::Molecules3D, Mode::Hands, Mode::Theory];
         let active = modes.iter().position(|&m| m == mode);

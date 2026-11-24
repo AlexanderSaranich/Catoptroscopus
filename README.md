@@ -2,6 +2,24 @@
 
 An interactive playground for mirrors, chirality and enantiomorphs, rendered in Rust with [macroquad](https://github.com/not-fl3/macroquad). It has four modes: **2D shapes**, **3D models**, an animated **Hands** section and a **Theory** primer. Every mode except Theory has a live **Mathematics** panel showing the quantities behind what you see.
 
+## The name
+
+*Catoptroscopus* means roughly "mirror-watcher": one who looks at things in, and through, mirrors. It joins two Greek words and spells the result in Latin.
+
+| Part | Greek | Meaning |
+| --- | --- | --- |
+| *catoptro-* | κάτοπτρον (*katoptron*) | "mirror", from κατά (*kata*, "back, against") and the root ὀπ- (*op-*, "see") found in *optics*. The same word gives **catoptrics**, the optics of reflection. |
+| *-scopus* | σκοπός (*skopos*) | "watcher, one who looks", from σκοπέω (*skopeō*, "to look at, examine"), the root of *microscope* and *telescope*. |
+
+Put together in Greek, that would be *katoptroskopos*. Latinising it follows the usual rules for Greek loanwords:
+
+- Greek **κ** (*k*) is written **c**: *katoptro-* → *catoptro-*.
+- The Greek ending **-ος** (*-os*) becomes the Latin **-us**: *-skopos* → *-scopus*.
+
+That gives **catoptroscopus**. Latin made the same change to ἐπίσκοπος (*episkopos*, "overseer"), which became *episcopus*, the source of *episcopal*.
+
+The subtitle, **Mirror Lab**, is the plain-English version.
+
 ## Requirements
 
 - Rust (stable) with Cargo, via [rustup](https://rustup.rs). On Windows: `winget install Rustlang.Rustup`.
