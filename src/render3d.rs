@@ -204,3 +204,36 @@ pub fn label3(cam: &Cam, p: Vec3, s: &str, size: f32, col: Color) {
         text(s, q.x - w / 2.0, q.y, size, col);
     }
 }
+
+/// A GPU camera that reproduces `Cam::project` exactly inside the canvas
+/// viewport, so depth-buffered meshes line up with the 2D overlays.
+pub fn camera3d(cam: &Cam) -> Camera3D {
+    let inv = cam.rot().inverse();
+    let (w, h) = (screen_width() - SIDEBAR_W, screen_height());
+    Camera3D {
+        position: cam.eye(),
+        target: Vec3::ZERO,
+        up: inv * Vec3::Y,
+        fovy: 2.0 * ((h / 2.0) / cam.focal()).atan(),
+        aspect: Some(w / h),
+        viewport: Some((SIDEBAR_W as i32, 0, w as i32, h as i32)),
+        z_near: 0.1,
+        z_far: 200.0,
+        ..Default::default()
+    }
+}
+
+/// Translucent quad drawn in the depth-tested 3D pass (call between
+/// `set_camera(camera3d(..))` and `set_default_camera()`).
+pub fn quad_3d(corners: [Vec3; 4], col: Color) {
+    let fill = with_alpha(col, 0.16);
+    let v: Vec<Vertex> = corners.iter().map(|&p| Vertex::new2(p, Vec2::ZERO, fill)).collect();
+    draw_mesh(&Mesh { vertices: v, indices: vec![0, 1, 2, 0, 2, 3], texture: None });
+    for i in 0..4 {
+        draw_line_3d(corners[i], corners[(i + 1) % 4], with_alpha(col, 0.8));
+    }
+    for k in 1..4 {
+        let f = k as f32 / 4.0;
+        draw_line_3d(corners[0].lerp(corners[3], f), corners[1].lerp(corners[2], f), with_alpha(col, 0.15));
+    }
+}

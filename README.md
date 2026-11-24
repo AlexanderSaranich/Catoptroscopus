@@ -33,7 +33,8 @@ The UI uses a system font with Greek and maths glyphs (Segoe UI on Windows, Aria
 
 ## Hands (key `3`)
 
-A narrated, scrubbable animation in five scenes:
+A narrated, scrubbable animation in five scenes. The hands are smooth anatomical meshes: a signed-distance model (palm, thumb and pinky-side pads, three-jointed curled fingers, thumb, wrist and sleeve) polygonised with surface nets, lit per vertex and drawn with the GPU depth buffer.
+
 
 1. **A hand and its reflection**: M = diag(−1, 1, 1), det M = −1.
 2. **Try to superimpose**: the right hand tries four rotations; red dashes show fingertips that don't match.

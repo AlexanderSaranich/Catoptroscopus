@@ -1,92 +1,16 @@
 //! Hands mode: an animated, narrated sequence about the most famous chiral
 //! objects of all, plus a particle-physics coda on helicity.
 
+use crate::handmesh::{self, HandMesh, Region};
 use crate::render3d::*;
 use crate::ui::*;
 use macroquad::prelude::*;
 use std::f32::consts::PI;
 
-const SKIN: Color = Color::new(0.96, 0.78, 0.64, 1.0);
-const NAIL: Color = Color::new(1.0, 0.88, 0.88, 1.0);
+const SKIN: Color = Color::new(0.90, 0.68, 0.55, 1.0);
+const NAIL: Color = Color::new(0.97, 0.84, 0.80, 1.0);
 const LEFT_C: Vec3 = Vec3::new(-2.2, 0.0, 0.0);
 const RIGHT_C: Vec3 = Vec3::new(2.2, 0.0, 0.0);
-
-#[derive(Clone, Copy, PartialEq)]
-enum Part {
-    Skin,
-    Nail,
-    Sleeve,
-}
-
-#[derive(Clone, Copy)]
-struct Bead {
-    p: Vec3,
-    r: f32,
-    part: Part,
-}
-
-struct HandModel {
-    beads: Vec<Bead>,
-    tips: Vec<usize>,
-    palm: Vec3,
-}
-
-/// A LEFT hand: palm faces +z, fingers point +y, thumb on the +x side.
-/// Handedness triad: a = fingers (+y), b = thumb (+x), c = palm normal (+z)
-/// gives (a × b) · c = −1.
-fn hand_model() -> HandModel {
-    let mut beads = Vec::new();
-    let mut tips = Vec::new();
-    for ix in 0..4 {
-        for iy in 0..4 {
-            let p = vec3(-0.45 + 0.3 * ix as f32, -0.45 + 0.3 * iy as f32, 0.0);
-            beads.push(Bead { p, r: 0.27, part: Part::Skin });
-        }
-    }
-    let bases = [0.45f32, 0.15, -0.15, -0.45];
-    let lens = [1.0f32, 1.12, 1.02, 0.8];
-    let c = 0.7;
-    for (xb, len) in bases.iter().zip(lens) {
-        let steps = (len / 0.09).round() as usize;
-        for i in 0..=steps {
-            let s = len * i as f32 / steps as f32;
-            let p = vec3(xb + xb * 0.18 * s, 0.6 + (c * s).sin() / c, (1.0 - (c * s).cos()) / c);
-            beads.push(Bead { p, r: 0.14 - 0.03 * s / len, part: Part::Skin });
-        }
-        tips.push(beads.len() - 1);
-        let s = len - 0.1;
-        let n = vec3(0.0, (c * s).sin(), -(c * s).cos());
-        let p = vec3(xb + xb * 0.18 * s, 0.6 + (c * s).sin() / c, (1.0 - (c * s).cos()) / c);
-        beads.push(Bead { p: p + n * 0.075, r: 0.085, part: Part::Nail });
-    }
-    // Thumb.
-    let base = vec3(0.5, -0.35, 0.1);
-    let d = vec3(0.8, 0.6, 0.45).normalize();
-    let len = 0.85;
-    let steps = 10;
-    for i in 0..=steps {
-        let s = len * i as f32 / steps as f32;
-        let p = base + d * s + vec3(0.0, 0.25 * s * s, 0.0);
-        beads.push(Bead { p, r: 0.17 - 0.04 * s / len, part: Part::Skin });
-    }
-    tips.push(beads.len() - 1);
-    let s = len - 0.1;
-    let p = base + d * s + vec3(0.0, 0.25 * s * s, 0.0);
-    beads.push(Bead { p: p + vec3(0.45, 0.0, -0.8).normalize() * 0.08, r: 0.09, part: Part::Nail });
-    // Wrist and sleeve.
-    let mut y = -0.65;
-    while y > -1.8 {
-        let sleeve = y < -0.95;
-        beads.push(Bead { p: vec3(0.0, y, 0.0), r: if sleeve { 0.36 } else { 0.29 }, part: if sleeve { Part::Sleeve } else { Part::Skin } });
-        y -= 0.12;
-    }
-    // Centre on the bead centroid.
-    let cen = beads.iter().map(|b| b.p).sum::<Vec3>() / beads.len() as f32;
-    for b in &mut beads {
-        b.p -= cen;
-    }
-    HandModel { beads, tips, palm: -cen }
-}
 
 fn refl_x() -> Mat3 {
     Mat3::from_diagonal(vec3(-1.0, 1.0, 1.0))
@@ -124,7 +48,7 @@ const ATTEMPTS: [&str; 4] = [
 ];
 
 pub struct AppHands {
-    hand: HandModel,
+    hand: HandMesh,
     cam: Cam,
     scene: usize,
     t: f32,
@@ -149,7 +73,7 @@ struct Pose {
 impl AppHands {
     pub fn new() -> AppHands {
         AppHands {
-            hand: hand_model(),
+            hand: handmesh::build(),
             cam: Cam::new(0.35, 0.22, 12.0),
             scene: 0,
             t: 0.0,
@@ -221,7 +145,30 @@ impl AppHands {
         }
     }
 
-    fn push_hand(&self, out: &mut Vec<Prim>, pose: Pose) {
+    /// Lit vertex colour for one hand vertex (soft "skin" shading).
+    fn shade(base: Color, n: Vec3, p: Vec3, eye: Vec3, light: Vec3, spec_k: f32) -> Color {
+        let v = (eye - p).normalize_or_zero();
+        let n = if n.dot(v) < 0.0 { -n } else { n };
+        let ndl = n.dot(light);
+        let wrap = ((ndl + 0.4) / 1.4).max(0.0);
+        let h = (light + v).normalize_or_zero();
+        let spec = n.dot(h).max(0.0).powf(30.0) * spec_k;
+        let rim = (1.0 - n.dot(v).max(0.0)).powi(3) * 0.22;
+        // A warm band near the light/shadow terminator imitates subsurface scattering.
+        let sss = (wrap * (1.0 - wrap) * 4.0) * 0.07;
+        let k = 0.30 + 0.72 * wrap;
+        Color::new(
+            (base.r * k + spec + rim * 0.55 + sss).min(1.0),
+            (base.g * k + spec + rim * 0.65 + sss * 0.35).min(1.0),
+            (base.b * k + spec + rim * 0.9).min(1.0),
+            base.a,
+        )
+    }
+
+    /// Draw one hand as a depth-buffered, per-vertex lit mesh.
+    /// Must be called inside the 3D camera pass.
+    fn draw_hand_mesh(&self, pose: Pose) {
+        let m = &self.hand;
         let det_sign = chi(pose.l);
         let sleeve = if det_sign.abs() < 0.05 {
             DIM
@@ -230,55 +177,78 @@ impl AppHands {
         } else {
             OPP
         };
-        for b in &self.hand.beads {
-            let mut col = match b.part {
-                Part::Skin => SKIN,
-                Part::Nail => NAIL,
-                Part::Sleeve => sleeve,
-            };
-            if let Some((theta, base)) = pose.w_theta {
-                let w = (base * b.p).x * theta.sin();
-                let k = (w.abs() / 1.3).min(1.0) * 0.75;
-                let tint = if w > 0.0 { Color::new(0.35, 0.55, 1.0, 1.0) } else { Color::new(1.0, 0.35, 0.45, 1.0) };
-                col = Color::new(
-                    col.r + (tint.r - col.r) * k,
-                    col.g + (tint.g - col.g) * k,
-                    col.b + (tint.b - col.b) * k,
-                    1.0,
-                );
-            }
-            push_ball(&self.cam, out, pose.center + pose.l * b.p, b.r, with_alpha(col, pose.alpha));
+        // Normals transform with the cofactor matrix (works even when the 3D
+        // shadow of the 4D rotation is nearly flat).
+        let l = pose.l;
+        let mut cof = Mat3::from_cols(l.y_axis.cross(l.z_axis), l.z_axis.cross(l.x_axis), l.x_axis.cross(l.y_axis));
+        if l.determinant() < 0.0 {
+            cof = -cof;
+        }
+        let eye = self.cam.eye();
+        let inv = self.cam.rot().inverse();
+        let light = (inv * vec3(-0.45, 0.65, 0.62)).normalize();
+        let verts: Vec<Vertex> = m
+            .pos
+            .iter()
+            .zip(&m.normal)
+            .zip(&m.region)
+            .map(|((&p, &n), &r)| {
+                let wp = pose.center + l * p;
+                let (mut base, spec) = match r {
+                    Region::Skin => (SKIN, 0.10),
+                    Region::Nail => (NAIL, 0.45),
+                    Region::Sleeve => (sleeve, 0.03),
+                };
+                if let Some((theta, b)) = pose.w_theta {
+                    let w = (b * p).x * theta.sin();
+                    let k = (w.abs() / 1.3).min(1.0) * 0.75;
+                    let tint = if w > 0.0 { Color::new(0.35, 0.55, 1.0, 1.0) } else { Color::new(1.0, 0.35, 0.45, 1.0) };
+                    base = Color::new(
+                        base.r + (tint.r - base.r) * k,
+                        base.g + (tint.g - base.g) * k,
+                        base.b + (tint.b - base.b) * k,
+                        1.0,
+                    );
+                }
+                base.a = pose.alpha;
+                let col = Self::shade(base, (cof * n).normalize_or_zero(), wp, eye, light, spec);
+                Vertex::new2(wp, Vec2::ZERO, col)
+            })
+            .collect();
+        for (ids, ind) in &m.chunks {
+            let vertices = ids.iter().map(|&g| verts[g as usize]).collect();
+            draw_mesh(&Mesh { vertices, indices: ind.clone(), texture: None });
         }
     }
 
     fn draw_hands(&self, poses: &[Pose], mismatch: Option<(Pose, Pose)>) {
-        let cam_side = self.cam.eye().x.signum();
-        let mut back = Vec::new();
-        let mut front = Vec::new();
-        for p in poses {
-            let mut v = Vec::new();
-            self.push_hand(&mut v, *p);
-            if p.center.x.signum() == cam_side || p.center.x.abs() < 1.5 {
-                front.extend(v);
-            } else {
-                back.extend(v);
-            }
+        set_camera(&camera3d(&self.cam));
+        // Opaque hands first, then translucent ones, then the glass mirror.
+        for p in poses.iter().filter(|p| p.alpha >= 0.99) {
+            self.draw_hand_mesh(*p);
         }
-        if let Some((a, b)) = mismatch {
-            for &i in &self.hand.tips {
-                let pa = a.center + a.l * self.hand.beads[i].p;
-                let pb = b.center + b.l * self.hand.beads[i].p;
-                if pa.distance(pb) > 0.2 {
-                    push_dash(&self.cam, &mut front, pa, pb, Color::new(1.0, 0.3, 0.3, 0.95));
-                }
-            }
+        for p in poses.iter().filter(|p| p.alpha < 0.99 && p.alpha > 0.01) {
+            self.draw_hand_mesh(*p);
         }
-        draw_prims(&mut back);
         if self.show_mirror {
             let s = 2.6;
-            draw_quad(&self.cam, [vec3(0.0, -s, -s), vec3(0.0, -s, s), vec3(0.0, s, s), vec3(0.0, s, -s)], MIRROR);
+            quad_3d([vec3(0.0, -s, -s), vec3(0.0, -s, s), vec3(0.0, s, s), vec3(0.0, s, -s)], MIRROR);
         }
-        draw_prims(&mut front);
+        set_default_camera();
+
+        if let Some((a, b)) = mismatch {
+            let mut marks = Vec::new();
+            for &t in &self.hand.tips {
+                let pa = a.center + a.l * t;
+                let pb = b.center + b.l * t;
+                if pa.distance(pb) > 0.2 {
+                    push_dash(&self.cam, &mut marks, pa, pb, Color::new(1.0, 0.3, 0.3, 0.95));
+                    push_ball(&self.cam, &mut marks, pa, 0.05, Color::new(1.0, 0.3, 0.3, 1.0));
+                    push_ball(&self.cam, &mut marks, pb, 0.05, Color::new(1.0, 0.3, 0.3, 1.0));
+                }
+            }
+            draw_prims(&mut marks);
+        }
     }
 
     fn triad(&self, pose: &Pose, lab: bool) {
@@ -352,7 +322,7 @@ impl AppHands {
                 math.push(("det(R · M) = det R · det M = (+1)(−1) = −1".into(), TEXT));
                 math.push(("No product of rotations has det −1,".into(), DIM));
                 math.push(("so no rigid motion maps L onto R.".into(), DIM));
-                math.push(("Chiral ⇔ symmetry group has no improper element.".into(), OPP));
+                math.push(("Chiral iff the symmetry group has no improper element.".into(), OPP));
             }
             2 => {
                 let lo = Mat3::from_quat(Quat::from_rotation_y(0.7 * t) * Quat::from_rotation_x(0.4 * (0.9 * t).sin()));

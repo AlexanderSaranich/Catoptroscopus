@@ -4,6 +4,7 @@ mod app2d;
 mod app3d;
 mod apphands;
 mod geom;
+mod handmesh;
 mod render3d;
 mod shapes;
 mod symmetry3d;
