@@ -1,0 +1,17 @@
+[package]
+name = "mirror-lab"
+version = "0.1.0"
+edition = "2021"
+description = "Play with mirrors, chirality and enantiomorphs (2D shapes and 3D molecules)"
+
+[dependencies]
+macroquad = "0.4"
+
+[profile.dev]
+opt-level = 1
+
+[profile.dev.package."*"]
+opt-level = 3
+
+[profile.release]
+opt-level = 3
