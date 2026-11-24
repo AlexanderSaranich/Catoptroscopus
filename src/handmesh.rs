@@ -41,11 +41,6 @@ fn capsule(p: Vec3, a: Vec3, b: Vec3, ra: f32, rb: f32) -> f32 {
     (pa - ba * h).length() - (ra + (rb - ra) * h)
 }
 
-fn round_box(p: Vec3, half: Vec3, r: f32) -> f32 {
-    let q = p.abs() - half;
-    q.max(Vec3::ZERO).length() + q.x.max(q.y.max(q.z)).min(0.0) - r
-}
-
 fn ellipsoid(p: Vec3, c: Vec3, r: Vec3) -> f32 {
     let q = (p - c) / r;
     (q.length() - 1.0) * r.min_element()
@@ -69,6 +64,8 @@ struct Skeleton {
     thumb: Vec<Segment>,
     nails: Vec<Nail>,
     tips: Vec<Vec3>,
+    /// Webbing between neighbouring fingers: (centre, radii, tilt) of a flat ellipsoid.
+    webs: Vec<(Vec3, Vec3, f32)>,
 }
 
 fn skeleton() -> Skeleton {
@@ -82,7 +79,8 @@ fn skeleton() -> Skeleton {
     let phal = [0.46f32, 0.30, 0.24];
     let curl = [8.0f32, 24.0, 36.0];
     let z = Vec3::Z;
-    let mut out = Skeleton { fingers: vec![], thumb: vec![], nails: vec![], tips: vec![] };
+    let mut out = Skeleton { fingers: vec![], thumb: vec![], nails: vec![], tips: vec![], webs: vec![] };
+    let mut bases: Vec<(Vec3, Vec3, f32)> = Vec::new();
     for (bx, by, len, r0, r1, splay) in fingers {
         let s = splay.to_radians();
         let d = vec3(s.sin(), s.cos(), 0.0);
@@ -90,6 +88,7 @@ fn skeleton() -> Skeleton {
         let mut p = vec3(bx - d.x * 0.25, by - 0.25, 0.02);
         let mut segs = vec![Segment { a: p, b: vec3(bx, by, 0.02), ra: r0 * 1.15, rb: r0 * 1.05 }];
         p = vec3(bx, by, 0.02);
+        bases.push((p, d, r0));
         let mut acc = 0.0;
         for (k, (&f, &c)) in phal.iter().zip(&curl).enumerate() {
             let c = c.to_radians();
@@ -109,6 +108,16 @@ fn skeleton() -> Skeleton {
             p = q;
         }
         out.fingers.push(segs);
+    }
+    // Webs: fill each crotch so the gap closes in a rounded wedge, set a little
+    // towards the palm side (the dorsal side shows knuckles and valleys instead).
+    for w in bases.windows(2) {
+        let ((pa, da, ra), (pb, db, rb)) = (w[0], w[1]);
+        let dir = (da + db).normalize();
+        let gap = pa.distance(pb) - ra - rb;
+        let c = (pa + pb) * 0.5 + dir * 0.06 + vec3(0.0, 0.0, 0.05);
+        let tilt = dir.x.atan2(dir.y);
+        out.webs.push((c, vec3(gap * 0.5 + 0.07, 0.17, 0.085), tilt));
     }
     // Thumb: metacarpal, proximal and distal phalanges.
     let j = [vec3(0.30, -0.42, 0.06), vec3(0.70, -0.08, 0.22), vec3(0.92, 0.22, 0.31), vec3(1.05, 0.47, 0.35)];
@@ -133,17 +142,48 @@ fn sleeve(p: Vec3) -> f32 {
     capsule(q, vec3(0.0, -1.18, 0.0), vec3(0.0, -2.05, 0.0), 0.45, 0.47) * 0.88
 }
 
+fn smax(a: f32, b: f32, k: f32) -> f32 {
+    -smin(-a, -b, k)
+}
+
+fn smoothstep(e0: f32, e1: f32, x: f32) -> f32 {
+    let t = ((x - e0) / (e1 - e0)).clamp(0.0, 1.0);
+    t * t * (3.0 - 2.0 * t)
+}
+
+/// Palm: a curved outline (bulging sides, knuckle-line arch, narrow wrist)
+/// given thickness with rounded rims, slightly cupped on the palm side.
+fn palm(p: Vec3) -> f32 {
+    let (x, y) = (p.x, p.y);
+    // Little-finger side swells out past the wrist, then eases in at the knuckle.
+    let left = -(0.34 + 0.27 * smoothstep(-0.8, 0.05, y) - 0.07 * smoothstep(0.1, 0.6, y));
+    // Index side flares more gently towards the index knuckle.
+    let right = 0.34 + 0.22 * smoothstep(-0.8, 0.2, y);
+    // Top follows the knuckle arc: highest under the middle finger.
+    let top = 0.68 - 0.55 * (x - 0.08) * (x - 0.08);
+    let bottom = -0.75;
+    let k = 0.16;
+    let d2 = smax(smax(left - x, x - right, k), smax(y - top, bottom - y, k), k);
+    // Domed cross-section: thickest in the middle, thinning towards the rim,
+    // with a shallow hollow in the palm.
+    let dome = smoothstep(0.05, -0.45, d2);
+    let hollow = 0.045 * (-((x - 0.02).powi(2) + (y - 0.02).powi(2)) / 0.10).exp();
+    let t = if p.z > 0.0 { 0.12 + 0.12 * dome - hollow } else { 0.12 + 0.14 * dome };
+    smax(d2, p.z.abs() - t, 0.14)
+}
+
 fn sdf(sk: &Skeleton, p: Vec3) -> f32 {
-    // Palm: rounded slab, narrowing towards the wrist.
-    let taper = 1.0 + 0.2 * ((0.55 - p.y) / 1.2).clamp(0.0, 1.0);
-    let pp = vec3(p.x * taper, p.y - 0.04, p.z);
-    // Knuckle line arches: the palm is longest under the middle finger.
-    let arch = 0.06 * (1.0 - (p.x / 0.6).powi(2)).max(0.0);
-    let pp = vec3(pp.x, pp.y - arch * ((p.y + 0.2).max(0.0) / 0.8).min(1.0), pp.z);
-    let mut d = round_box(pp, vec3(0.42, 0.47, 0.05), 0.23);
+    let mut d = palm(p);
     // Thenar (thumb ball) and hypothenar pads on the palm side.
     d = smin(d, ellipsoid(p, vec3(0.36, -0.30, 0.10), vec3(0.30, 0.36, 0.20)), 0.12);
     d = smin(d, ellipsoid(p, vec3(-0.40, -0.22, 0.08), vec3(0.22, 0.38, 0.17)), 0.10);
+    // Webbing between the fingers.
+    for &(c, r, tilt) in &sk.webs {
+        let (sn, cs) = tilt.sin_cos();
+        let q = p - c;
+        let q = vec3(q.x * cs - q.y * sn, q.x * sn + q.y * cs, q.z);
+        d = smin(d, ellipsoid(q, Vec3::ZERO, r), 0.06);
+    }
     // Wrist and forearm.
     d = smin(d, forearm(p), 0.22);
     // Thumb blends broadly into the thenar region.
@@ -324,3 +364,4 @@ mod tests {
         }
     }
 }
+

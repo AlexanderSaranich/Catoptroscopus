@@ -70,7 +70,7 @@ A narrated, scrubbable animation in five scenes:
 
 Sleeve colours show handedness live: teal for left (χ = −1), orange for right (χ = +1), grey when flattened (det = 0).
 
-**How the hands are made.** Each hand is a smooth signed-distance model: a rounded, tapered palm with an arched knuckle line, thenar and hypothenar pads, three-segment curled fingers with knuckles, a jointed thumb, a flattened wrist and a sleeve cuff. It is turned into a mesh once at start-up with surface nets. Each frame the mesh is lit per vertex (wrapped diffuse light, a warm subsurface tint, specular highlights and rim light), with the fingernails and sleeve picked out by region. It is drawn through a GPU camera that matches the app's software projection exactly, so the depth buffer handles overlaps and the 2D overlays still line up.
+**How the hands are made.** Each hand is a smooth signed-distance model: a palm with curved sides that swell out from a narrow wrist, a domed, slightly cupped cross-section and an arched knuckle line, thenar and hypothenar pads, webbing that closes each gap between the fingers in a rounded wedge, three-segment curled fingers with knuckles, a jointed thumb, a flattened wrist and a sleeve cuff. It is turned into a mesh once at start-up with surface nets. Each frame the mesh is lit per vertex (wrapped diffuse light, a warm subsurface tint, specular highlights and rim light), with the fingernails and sleeve picked out by region. It is drawn through a GPU camera that matches the app's software projection exactly, so the depth buffer handles overlaps and the 2D overlays still line up.
 
 ## Theory (key `4`)
 
@@ -135,6 +135,7 @@ Four tests check:
 1. **First version.** 2D mirror lab (shapes, mirrors, kaleidoscopes, superimpose challenge) and 3D molecules with a mirror plane and a best-fit superimpose search.
 2. **Mathematics and Hands.** Added the Hands animation, the Theory primer and live maths panels in every mode: det and symmetry groups and a chirality measure in 2D; point groups, R/S, torsion, and the trefoil and figure-eight knots with writhe and Jones polynomials in 3D. Also added the animated flip through 3D, a Unicode UI font, a scrollable sidebar, start-up arguments and a smaller default window. The 3D renderer moved to a shared right-handed camera so that displayed handedness matches the maths.
 3. **Realistic hands.** Replaced the bead-chain hands with smooth anatomical meshes, lit per vertex and drawn with the GPU depth buffer.
+4. **More natural hands.** Replaced the boxy palm with a curved outline and domed cross-section, and added webbing so the fingers meet the palm in rounded wedges.
 
 ## License
 
