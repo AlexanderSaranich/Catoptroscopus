@@ -139,4 +139,10 @@ Four tests check:
 
 ## License
 
-MIT
+MIT (see [LICENSE](LICENSE)).
+
+The Rust crates this app is built from are under MIT, Apache-2.0, Zlib and similar permissive licenses. Their notices are collected in [THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENSES.md). Include that file with any built copy you share. After changing dependencies, regenerate it with:
+
+```sh
+powershell -File tools/third-party-licenses.ps1
+```
