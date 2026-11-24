@@ -64,23 +64,21 @@ struct Skeleton {
     thumb: Vec<Segment>,
     nails: Vec<Nail>,
     tips: Vec<Vec3>,
-    /// Webbing between neighbouring fingers: (centre, radii, tilt) of a flat ellipsoid.
-    webs: Vec<(Vec3, Vec3, f32)>,
 }
 
 fn skeleton() -> Skeleton {
     // (base x, base y, length, base radius, tip radius, splay degrees)
     let fingers = [
-        (0.415f32, 0.60f32, 1.00f32, 0.136f32, 0.108f32, 4.0f32), // index
-        (0.14, 0.66, 1.12, 0.142, 0.112, 0.0),                       // middle
-        (-0.14, 0.62, 1.04, 0.134, 0.104, -3.0),                     // ring
-        (-0.40, 0.52, 0.84, 0.118, 0.092, -8.0),                     // little
+        // Average proportions: the middle finger is about 0.43 of hand length.
+        (0.415f32, 0.44f32, 0.88f32, 0.142f32, 0.114f32, 4.0f32), // index
+        (0.14, 0.50, 0.98, 0.148, 0.118, 0.0),                       // middle
+        (-0.14, 0.46, 0.92, 0.140, 0.110, -3.0),                     // ring
+        (-0.40, 0.36, 0.74, 0.124, 0.098, -8.0),                     // little
     ];
     let phal = [0.46f32, 0.30, 0.24];
     let curl = [8.0f32, 24.0, 36.0];
     let z = Vec3::Z;
-    let mut out = Skeleton { fingers: vec![], thumb: vec![], nails: vec![], tips: vec![], webs: vec![] };
-    let mut bases: Vec<(Vec3, Vec3, f32)> = Vec::new();
+    let mut out = Skeleton { fingers: vec![], thumb: vec![], nails: vec![], tips: vec![] };
     for (bx, by, len, r0, r1, splay) in fingers {
         let s = splay.to_radians();
         let d = vec3(s.sin(), s.cos(), 0.0);
@@ -88,7 +86,6 @@ fn skeleton() -> Skeleton {
         let mut p = vec3(bx - d.x * 0.25, by - 0.25, 0.02);
         let mut segs = vec![Segment { a: p, b: vec3(bx, by, 0.02), ra: r0 * 1.15, rb: r0 * 1.05 }];
         p = vec3(bx, by, 0.02);
-        bases.push((p, d, r0));
         let mut acc = 0.0;
         for (k, (&f, &c)) in phal.iter().zip(&curl).enumerate() {
             let c = c.to_radians();
@@ -109,18 +106,8 @@ fn skeleton() -> Skeleton {
         }
         out.fingers.push(segs);
     }
-    // Webs: fill each crotch so the gap closes in a rounded wedge, set a little
-    // towards the palm side (the dorsal side shows knuckles and valleys instead).
-    for w in bases.windows(2) {
-        let ((pa, da, ra), (pb, db, rb)) = (w[0], w[1]);
-        let dir = (da + db).normalize();
-        let gap = pa.distance(pb) - ra - rb;
-        let c = (pa + pb) * 0.5 + dir * 0.06 + vec3(0.0, 0.0, 0.05);
-        let tilt = dir.x.atan2(dir.y);
-        out.webs.push((c, vec3(gap * 0.5 + 0.07, 0.17, 0.085), tilt));
-    }
     // Thumb: metacarpal, proximal and distal phalanges.
-    let j = [vec3(0.30, -0.42, 0.06), vec3(0.70, -0.08, 0.22), vec3(0.92, 0.22, 0.31), vec3(1.05, 0.47, 0.35)];
+    let j = [vec3(0.30, -0.42, 0.06), vec3(0.68, -0.14, 0.22), vec3(0.86, 0.08, 0.30), vec3(0.97, 0.29, 0.34)];
     let r = [(0.20, 0.168), (0.158, 0.142), (0.138, 0.115)];
     for k in 0..3 {
         out.thumb.push(Segment { a: j[k], b: j[k + 1], ra: r[k].0, rb: r[k].1 });
@@ -156,18 +143,18 @@ fn smoothstep(e0: f32, e1: f32, x: f32) -> f32 {
 fn palm(p: Vec3) -> f32 {
     let (x, y) = (p.x, p.y);
     // Little-finger side swells out past the wrist, then eases in at the knuckle.
-    let left = -(0.34 + 0.27 * smoothstep(-0.8, 0.05, y) - 0.07 * smoothstep(0.1, 0.6, y));
+    let left = -(0.34 + 0.27 * smoothstep(-0.8, -0.05, y) - 0.07 * smoothstep(-0.02, 0.45, y));
     // Index side flares more gently towards the index knuckle.
-    let right = 0.34 + 0.22 * smoothstep(-0.8, 0.2, y);
+    let right = 0.34 + 0.22 * smoothstep(-0.8, 0.08, y);
     // Top follows the knuckle arc: highest under the middle finger.
-    let top = 0.68 - 0.55 * (x - 0.08) * (x - 0.08);
+    let top = 0.52 - 0.55 * (x - 0.08) * (x - 0.08);
     let bottom = -0.75;
     let k = 0.16;
     let d2 = smax(smax(left - x, x - right, k), smax(y - top, bottom - y, k), k);
     // Domed cross-section: thickest in the middle, thinning towards the rim,
     // with a shallow hollow in the palm.
     let dome = smoothstep(0.05, -0.45, d2);
-    let hollow = 0.045 * (-((x - 0.02).powi(2) + (y - 0.02).powi(2)) / 0.10).exp();
+    let hollow = 0.045 * (-((x - 0.02).powi(2) + (y + 0.06).powi(2)) / 0.10).exp();
     let t = if p.z > 0.0 { 0.12 + 0.12 * dome - hollow } else { 0.12 + 0.14 * dome };
     smax(d2, p.z.abs() - t, 0.14)
 }
@@ -177,28 +164,23 @@ fn sdf(sk: &Skeleton, p: Vec3) -> f32 {
     // Thenar (thumb ball) and hypothenar pads on the palm side.
     d = smin(d, ellipsoid(p, vec3(0.36, -0.30, 0.10), vec3(0.30, 0.36, 0.20)), 0.12);
     d = smin(d, ellipsoid(p, vec3(-0.40, -0.22, 0.08), vec3(0.22, 0.38, 0.17)), 0.10);
-    // Webbing between the fingers.
-    for &(c, r, tilt) in &sk.webs {
-        let (sn, cs) = tilt.sin_cos();
-        let q = p - c;
-        let q = vec3(q.x * cs - q.y * sn, q.x * sn + q.y * cs, q.z);
-        d = smin(d, ellipsoid(q, Vec3::ZERO, r), 0.06);
-    }
     // Wrist and forearm.
     d = smin(d, forearm(p), 0.22);
-    // Thumb blends broadly into the thenar region.
+    let body = d;
+    // Thumb blends into the thenar region, tightly enough to keep a clean crotch.
     let mut th = f32::MAX;
     for s in &sk.thumb {
         th = smin(th, capsule(p, s.a, s.b, s.ra, s.rb), 0.05);
     }
-    d = smin(d, th, 0.14);
-    // Fingers: each blends into the palm, but not into each other.
+    d = smin(d, th, 0.08);
+    // Fingers: each blends into the palm only, then joins with a hard union,
+    // so neighbouring fingers stay separate down to the knuckles.
     for f in &sk.fingers {
         let mut fd = f32::MAX;
         for s in f {
             fd = smin(fd, capsule(p, s.a, s.b, s.ra, s.rb), 0.035);
         }
-        d = smin(d, fd, 0.09);
+        d = d.min(smin(body, fd, 0.06));
     }
     // Sleeve: a crisp union.
     d.min(sleeve(p))
@@ -319,7 +301,7 @@ pub fn build() -> HandMesh {
     let c = pos.iter().copied().sum::<Vec3>() / pos.len() as f32;
     let pos: Vec<Vec3> = pos.into_iter().map(|p| p - c).collect();
     let tips = sk.tips.iter().map(|&t| t - c).collect();
-    let palm = vec3(0.0, 0.05, 0.24) - c;
+    let palm = vec3(0.0, -0.03, 0.24) - c;
 
     // Split into draw-call sized chunks (macroquad: <= 5000 indices per call).
     let mut chunks = Vec::new();
