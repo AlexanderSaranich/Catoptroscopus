@@ -70,7 +70,7 @@ A narrated, scrubbable animation in five scenes:
 
 Sleeve colours show handedness live: teal for left (χ = −1), orange for right (χ = +1), grey when flattened (det = 0).
 
-**How the hands are made.** Each hand is a smooth signed-distance model: a palm with curved sides that swell out from a narrow wrist, a domed, slightly cupped cross-section and an arched knuckle line, thenar and hypothenar pads, webbing that closes each gap between the fingers in a rounded wedge, three-segment curled fingers with knuckles, a jointed thumb, a flattened wrist and a sleeve cuff. It is turned into a mesh once at start-up with surface nets. Each frame the mesh is lit per vertex (wrapped diffuse light, a warm subsurface tint, specular highlights and rim light), with the fingernails and sleeve picked out by region. It is drawn through a GPU camera that matches the app's software projection exactly, so the depth buffer handles overlaps and the 2D overlays still line up.
+**How the hands are made.** Each hand is a smooth signed-distance model: a palm with curved sides that swell out from a narrow wrist, a domed, slightly cupped cross-section and an arched knuckle line, thenar and hypothenar pads, three-segment curled fingers with knuckles that each blend into the palm but stay separate from one another, a jointed thumb, a flattened wrist and a sleeve cuff. It is turned into a mesh once at start-up with surface nets. Each frame the mesh is lit per vertex (wrapped diffuse light, a warm subsurface tint, specular highlights and rim light), with the fingernails and sleeve picked out by region. It is drawn through a GPU camera that matches the app's software projection exactly, so the depth buffer handles overlaps and the 2D overlays still line up.
 
 ## Theory (key `4`)
 
