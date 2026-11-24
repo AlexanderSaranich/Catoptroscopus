@@ -3,6 +3,7 @@ name = "mirror-lab"
 version = "0.1.0"
 edition = "2021"
 description = "Play with mirrors, chirality and enantiomorphs (2D shapes and 3D molecules)"
+license = "MIT"
 
 [dependencies]
 macroquad = "0.4"
