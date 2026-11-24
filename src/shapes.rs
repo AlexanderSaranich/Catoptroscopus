@@ -1,6 +1,6 @@
 //! Library of 2D shapes, some chiral and some achiral.
 
-use crate::geom::{centroid, mat_angle, symmetry_group, triangulate};
+use crate::geom::{centroid, flip, mat_angle, symmetry_group, triangulate};
 use macroquad::math::{vec2, Mat2, Vec2};
 use std::f32::consts::{PI, TAU};
 
@@ -14,6 +14,8 @@ pub struct ShapeDef {
     pub tris: Vec<[usize; 3]>,
     /// Symmetry group (orthogonal matrices about the centroid).
     pub group: Vec<Mat2>,
+    /// Vertex-based continuous chirality measure (0 = achiral, 0..100).
+    pub ccm: f32,
 }
 
 impl ShapeDef {
@@ -26,7 +28,8 @@ impl ShapeDef {
         }
         let tris = triangulate(&pts);
         let group = symmetry_group(&pts);
-        ShapeDef { name, blurb, pts, tris, group }
+        let ccm = chirality_measure(&pts);
+        ShapeDef { name, blurb, pts, tris, group, ccm }
     }
 
     pub fn is_chiral(&self) -> bool {
@@ -37,6 +40,16 @@ impl ShapeDef {
         self.group.iter().filter(|m| m.determinant() > 0.0).count()
     }
 
+    /// 2D point group: Cn (rotations only, chiral) or Dn (n mirror lines, achiral).
+    pub fn group_name(&self) -> String {
+        let n = self.rotation_order();
+        if self.is_chiral() {
+            format!("C{n}")
+        } else {
+            format!("D{n}")
+        }
+    }
+
     /// Angles of the shape's own mirror lines (through its centroid).
     pub fn mirror_line_angles(&self) -> Vec<f32> {
         self.group
@@ -45,6 +58,31 @@ impl ShapeDef {
             .map(|&m| mat_angle(m) * 0.5)
             .collect()
     }
+}
+
+/// Zabrodsky–Avnir style continuous chirality measure on the polygon's vertices:
+/// S = 100 · mean |Pᵢ − Qᵢ|² / r_max², where Q is the nearest achiral polygon,
+/// found by averaging P with its best-aligned mirror image (all vertex pairings tried).
+fn chirality_measure(pts: &[Vec2]) -> f32 {
+    let n = pts.len();
+    let mean = pts.iter().copied().sum::<Vec2>() / n as f32;
+    let p: Vec<Vec2> = pts.iter().map(|&v| v - mean).collect();
+    let rmax = p.iter().map(|v| v.length()).fold(0.0, f32::max);
+    let mut best = f32::MAX;
+    for k in 0..n {
+        // Mirror image with reversed vertex order, so q[i] is paired with p[i].
+        let q: Vec<Vec2> = (0..n).map(|i| flip() * p[(k + n - i) % n]).collect();
+        let (mut c, mut s) = (0.0, 0.0);
+        for i in 0..n {
+            c += q[i].dot(p[i]);
+            s += q[i].perp_dot(p[i]);
+        }
+        let r = Mat2::from_angle(s.atan2(c));
+        let d: f32 = (0..n).map(|i| (r * q[i] - p[i]).length_squared()).sum();
+        best = best.min(d);
+    }
+    // |P − Q|² = |P − M·P|² / 4.
+    100.0 * best / 4.0 / n as f32 / (rmax * rmax)
 }
 
 fn grid(pts: &[(f32, f32)]) -> Vec<Vec2> {
@@ -103,7 +141,7 @@ pub fn library() -> Vec<ShapeDef> {
         ShapeDef::new(
             "Scalene triangle",
             "Three unequal sides: in the plane, even a triangle can be chiral.",
-            grid(&[(0., 0.), (4., 0.), (1., 2.5)]),
+            grid(&[(0., 0.), (5., 0.), (1., 2.)]),
         ),
         ShapeDef::new(
             "Parallelogram",
@@ -170,6 +208,12 @@ mod tests {
             assert_eq!(s.rotation_order(), rot, "{name}");
             assert_eq!(s.mirror_line_angles().len(), lines, "{name}");
             assert_eq!(s.tris.len(), s.pts.len() - 2, "{name} triangulation");
+            if chiral {
+                assert!(s.ccm > 0.1, "{name} ccm {}", s.ccm);
+            } else {
+                assert!(s.ccm < 1e-3, "{name} ccm {}", s.ccm);
+            }
+            println!("{name}: group {} ccm {:.2}", s.group_name(), s.ccm);
         }
     }
 }

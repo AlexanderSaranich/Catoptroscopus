@@ -1,6 +1,45 @@
 //! Tiny immediate-mode sidebar UI drawn with macroquad primitives.
 
 use macroquad::prelude::*;
+use std::cell::RefCell;
+
+thread_local! {
+    static FONT: RefCell<Option<Font>> = const { RefCell::new(None) };
+}
+
+/// Load a system font with Greek/math glyphs; falls back to macroquad's ASCII font.
+pub fn load_font() {
+    let candidates = [
+        "C:/Windows/Fonts/segoeui.ttf",
+        "C:/Windows/Fonts/arial.ttf",
+        "/System/Library/Fonts/Supplemental/Arial Unicode.ttf",
+        "/Library/Fonts/Arial Unicode.ttf",
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+        "/usr/share/fonts/TTF/DejaVuSans.ttf",
+        "/usr/share/fonts/dejavu/DejaVuSans.ttf",
+    ];
+    for path in candidates {
+        if let Ok(bytes) = std::fs::read(path) {
+            if let Ok(f) = load_ttf_font_from_bytes(&bytes) {
+                FONT.with(|cell| *cell.borrow_mut() = Some(f));
+                return;
+            }
+        }
+    }
+}
+
+/// Draw text with the UI font; returns its width.
+pub fn text(s: &str, x: f32, y: f32, size: f32, col: Color) -> f32 {
+    FONT.with(|cell| {
+        let f = cell.borrow();
+        draw_text_ex(s, x, y, TextParams { font: f.as_ref(), font_size: size as u16, color: col, ..Default::default() })
+            .width
+    })
+}
+
+pub fn text_width(s: &str, size: f32) -> f32 {
+    FONT.with(|cell| measure_text(s, cell.borrow().as_ref(), size as u16, 1.0).width)
+}
 
 pub const SIDEBAR_W: f32 = 310.0;
 
@@ -43,9 +82,9 @@ pub fn dashed_line(a: Vec2, b: Vec2, dash: f32, thick: f32, col: Color) {
 }
 
 pub struct Ui {
-    x: f32,
+    pub x: f32,
     pub y: f32,
-    w: f32,
+    pub w: f32,
     m: Vec2,
     clicked: bool,
 }
@@ -60,13 +99,13 @@ impl Ui {
     }
 
     pub fn label(&mut self, s: &str, size: f32, col: Color) {
-        draw_text(s, self.x, self.y + size * 0.75, size, col);
-        self.y += size * 0.95;
+        text(s, self.x, self.y + size * 0.8, size, col);
+        self.y += size * 1.12;
     }
 
     pub fn heading(&mut self, s: &str) {
         self.space(6.0);
-        draw_text(s, self.x, self.y + 14.0, 19.0, MIRROR);
+        text(s, self.x, self.y + 15.0, 18.0, MIRROR);
         draw_line(self.x, self.y + 20.0, self.x + self.w, self.y + 20.0, 1.0, with_alpha(MIRROR, 0.25));
         self.y += 26.0;
     }
@@ -75,7 +114,7 @@ impl Ui {
         let mut line = String::new();
         for word in s.split_whitespace() {
             let trial = if line.is_empty() { word.to_string() } else { format!("{line} {word}") };
-            if measure_text(&trial, None, size as u16, 1.0).width > self.w && !line.is_empty() {
+            if text_width(&trial, size) > self.w && !line.is_empty() {
                 self.label(&line, size, col);
                 line = word.to_string();
             } else {
@@ -98,9 +137,12 @@ impl Ui {
         };
         draw_rectangle(r.x, r.y, r.w, r.h, fill);
         draw_rectangle_lines(r.x, r.y, r.w, r.h, 1.0, with_alpha(MIRROR, if hover { 0.7 } else { 0.3 }));
-        let size = 18.0;
-        let tw = measure_text(label, None, size as u16, 1.0).width;
-        draw_text(label, r.x + (r.w - tw) / 2.0, r.y + r.h / 2.0 + 5.0, size, TEXT);
+        let mut size = 16.0;
+        while text_width(label, size) > r.w - 6.0 && size > 11.0 {
+            size -= 1.0;
+        }
+        let tw = text_width(label, size);
+        text(label, r.x + (r.w - tw) / 2.0, r.y + r.h / 2.0 + size * 0.35, size, TEXT);
         hover && self.clicked
     }
 
@@ -133,7 +175,7 @@ impl Ui {
         if *v {
             draw_rectangle(self.x + 4.0, self.y + 7.0, 8.0, 8.0, SAME);
         }
-        draw_text(label, self.x + 24.0, self.y + 16.0, 18.0, TEXT);
+        text(label, self.x + 24.0, self.y + 16.0, 16.0, TEXT);
         if hover && self.clicked {
             *v = !*v;
         }
@@ -143,7 +185,47 @@ impl Ui {
     pub fn swatch(&mut self, col: Color, label: &str) {
         draw_rectangle(self.x, self.y + 3.0, 16.0, 14.0, with_alpha(col, 0.55));
         draw_rectangle_lines(self.x, self.y + 3.0, 16.0, 14.0, 1.5, col);
-        draw_text(label, self.x + 24.0, self.y + 15.0, 17.0, TEXT);
+        text(label, self.x + 24.0, self.y + 15.0, 15.0, TEXT);
         self.y += 21.0;
+    }
+}
+
+/// A translucent info box with lines of text, anchored at the canvas top-right.
+pub fn info_box(title: &str, lines: &[(String, Color)]) {
+    let size = 16.0;
+    let w = lines
+        .iter()
+        .map(|(l, _)| text_width(l, size))
+        .fold(text_width(title, 17.0), f32::max)
+        + 24.0;
+    let h = 30.0 + lines.len() as f32 * 20.0;
+    let x = screen_width() - w - 14.0;
+    let y = 14.0;
+    draw_rectangle(x, y, w, h, with_alpha(PANEL, 0.88));
+    draw_rectangle_lines(x, y, w, h, 1.0, with_alpha(MIRROR, 0.35));
+    text(title, x + 12.0, y + 20.0, 17.0, MIRROR);
+    for (i, (l, c)) in lines.iter().enumerate() {
+        text(l, x + 12.0, y + 42.0 + i as f32 * 20.0, size, *c);
+    }
+}
+
+/// One-line hint at the bottom-left of the canvas.
+pub fn hint(s: &str) {
+    draw_rectangle(SIDEBAR_W, screen_height() - 30.0, screen_width() - SIDEBAR_W, 30.0, with_alpha(BG, 0.9));
+    text(s, SIDEBAR_W + 14.0, screen_height() - 12.0, 15.0, with_alpha(DIM, 0.85));
+}
+
+/// Format a signed number with a typographic minus sign.
+pub fn sgn(v: f32, prec: usize) -> String {
+    let v = if v.abs() < 0.5 * 10f32.powi(-(prec as i32)) { 0.0 } else { v };
+    format!("{:+.*}", prec, v).replace('-', "−")
+}
+
+/// "+1" / "−1" for a sign.
+pub fn pm1(v: f32) -> &'static str {
+    if v < 0.0 {
+        "−1"
+    } else {
+        "+1"
     }
 }

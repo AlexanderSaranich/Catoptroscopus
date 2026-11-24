@@ -71,6 +71,8 @@ pub struct App2D {
     sel_mirror: Option<usize>,
     flash: Option<(String, Color, f64)>,
     image_count: usize,
+    /// (piece, start time, matrix before the flip) for the flip-through-3D animation.
+    flip_anim: Option<(Which, f64, Mat2)>,
 }
 
 fn canvas_center() -> Vec2 {
@@ -93,6 +95,7 @@ impl App2D {
             selected: Which::Orig,
             sel_mirror: None,
             flash: None,
+            flip_anim: None,
             image_count: 0,
         };
         app.preset_single();
@@ -214,7 +217,7 @@ impl App2D {
     /// Every distinct composition of mirror reflections up to `depth`.
     fn images(&self) -> Vec<(Xf, usize)> {
         let refl: Vec<Xf> = self.mirrors.iter().map(|m| reflection(m.a, m.b)).collect();
-        let base = self.orig.xf();
+        let base = self.display_xf(Which::Orig);
         let mut all: Vec<(Xf, usize)> = vec![(base, 0)];
         let mut frontier = vec![base];
         let (sw, sh) = (screen_width(), screen_height());
@@ -324,10 +327,7 @@ impl App2D {
             self.try_snap();
         }
         if is_key_pressed(KeyCode::F) {
-            let p = self.piece(sel);
-            p.flipped = !p.flipped;
-            p.angle = -p.angle;
-            self.say("Flipped over! In the plane, a flip IS a reflection: it needs a trip through 3D.", OPP);
+            self.flip(sel);
         }
         if is_key_pressed(KeyCode::M) {
             self.add_mirror();
@@ -355,6 +355,60 @@ impl App2D {
         }
         if is_key_pressed(KeyCode::Minus) || is_key_pressed(KeyCode::KpSubtract) {
             self.depth = self.depth.saturating_sub(1).max(1);
+        }
+    }
+
+    /// Flip a piece over by "rotating it through 3D" (animated).
+    fn flip(&mut self, w: Which) {
+        let old = self.piece(w).mat();
+        let p = self.piece(w);
+        p.flipped = !p.flipped;
+        p.angle = -p.angle;
+        self.flip_anim = Some((w, get_time(), old));
+        self.say("Flipped through 3D! Inside the plane, a flip can only be done by a reflection.", OPP);
+    }
+
+    /// Public hooks used by the Theory page.
+    pub fn select_shape(&mut self, i: usize) {
+        self.set_shape(i);
+    }
+
+    pub fn flip_demo(&mut self) {
+        self.set_shape(0);
+        self.preset_single();
+        self.selected = Which::Orig;
+        self.flip(Which::Orig);
+    }
+
+    /// Progress of the flip animation for piece `w` (None if not animating).
+    fn flip_progress(&self, w: Which) -> Option<(f32, Mat2)> {
+        match self.flip_anim {
+            Some((fw, t0, old)) if fw == w => {
+                let s = ((get_time() - t0) / 0.9) as f32;
+                if s < 1.0 {
+                    Some((s, old))
+                } else {
+                    None
+                }
+            }
+            _ => None,
+        }
+    }
+
+    /// The transform used for drawing, including any in-progress flip.
+    fn display_xf(&self, w: Which) -> Xf {
+        let p = match w {
+            Which::Orig => self.orig,
+            Which::Copy => self.copy,
+        };
+        match self.flip_progress(w) {
+            // Rotating about the world horizontal axis through 3D: its shadow
+            // in the plane scales y by cos(pi s), passing through det = 0.
+            Some((s, old)) => {
+                let sq = Mat2::from_cols(vec2(1.0, 0.0), vec2(0.0, (PI * s).cos()));
+                Xf { m: sq * old, t: p.pos }
+            }
+            None => p.xf(),
         }
     }
 
@@ -529,7 +583,7 @@ impl App2D {
         let order = self.shape().rotation_order();
         if order > 1 {
             draw_circle_lines(o.pos.x, o.pos.y, 5.0, 2.0, GOOD);
-            draw_text(&format!("{order}-fold"), o.pos.x + 8.0, o.pos.y - 8.0, 18.0, GOOD);
+            text(&format!("{order}-fold"), o.pos.x + 8.0, o.pos.y - 8.0, 16.0, GOOD);
         }
     }
 
@@ -565,7 +619,7 @@ impl App2D {
         }
 
         // Original.
-        self.draw_piece(&self.orig.xf(), with_alpha(SAME, 0.55), SAME, 2.5);
+        self.draw_piece(&self.display_xf(Which::Orig), with_alpha(SAME, 0.55), SAME, 2.5);
         self.draw_knob(&self.orig, SAME);
         if self.show_sym {
             self.draw_symmetry_lines();
@@ -577,15 +631,15 @@ impl App2D {
             let c = if same { SAME } else { OPP };
             let matched = self.exactly_matched();
             let fill = with_alpha(c, if matched { 0.25 } else { 0.4 });
-            self.draw_piece(&self.copy.xf(), fill, if matched { GOOD } else { COPY }, 2.5);
+            self.draw_piece(&self.display_xf(Which::Copy), fill, if matched { GOOD } else { COPY }, 2.5);
             self.draw_knob(&self.copy, COPY);
             if matched {
                 let p = self.orig.pos;
-                draw_text("SUPERIMPOSED", p.x - 60.0, p.y + SHAPE_RADIUS + 30.0, 22.0, GOOD);
+                text("SUPERIMPOSED", p.x - 60.0, p.y + SHAPE_RADIUS + 30.0, 22.0, GOOD);
             } else if self.copy.pos.distance(self.orig.pos) < SHAPE_RADIUS && !same && self.shape().is_chiral() {
                 let p = self.orig.pos;
-                draw_text(
-                    "Opposite hands - no slide or turn can make these coincide",
+                text(
+                    "Opposite hands: no slide or turn can make these coincide",
                     p.x - 210.0,
                     p.y + SHAPE_RADIUS + 30.0,
                     18.0,
@@ -600,18 +654,62 @@ impl App2D {
             draw_circle_lines(p.x, p.y, 4.0, 1.5, TEXT);
         }
 
+        self.draw_math();
+        hint("Drag: move  ·  Wheel / Q E / knob: rotate  ·  F: flip through 3D  ·  M / Del: mirrors  ·  + −: bounces  ·  Tab: shape  ·  C: copy  ·  S: symmetry lines");
+
         // Flash message.
         if let Some((msg, col, t0)) = &self.flash {
             let age = get_time() - t0;
             if age < 4.0 {
                 let a = (1.0 - ((age - 3.0).max(0.0)) as f32).clamp(0.0, 1.0);
-                let tw = measure_text(msg, None, 22, 1.0).width;
+                let tw = text_width(msg, 20.0);
                 let x = SIDEBAR_W + (sw - SIDEBAR_W - tw) / 2.0;
                 draw_rectangle(x - 14.0, 14.0, tw + 28.0, 36.0, with_alpha(PANEL, 0.92 * a));
                 draw_rectangle_lines(x - 14.0, 14.0, tw + 28.0, 36.0, 1.5, with_alpha(*col, a));
-                draw_text(msg, x, 39.0, 22.0, with_alpha(*col, a));
+                text(msg, x, 38.0, 20.0, with_alpha(*col, a));
             }
         }
+    }
+
+    fn draw_math(&self) {
+        let s = self.shape();
+        let w = if self.copy_on { self.selected } else { Which::Orig };
+        let a = self.display_xf(w).m;
+        let det = a.determinant();
+        let anim = self.flip_progress(w).is_some();
+        let f = |v: f32| format!("{:>6}", sgn(v, 2));
+        let who = if w == Which::Orig { "original" } else { "copy" };
+        let mut lines: Vec<(String, Color)> = vec![
+            (format!("Linear part of the {who}:"), DIM),
+            (format!("A = [ {}  {} ]", f(a.x_axis.x), f(a.y_axis.x)), TEXT),
+            (format!("      [ {}  {} ]", f(a.x_axis.y), f(a.y_axis.y)), TEXT),
+            if anim {
+                (format!("det A = {}   (passing through 3D!)", sgn(det, 2)), DIM)
+            } else if det > 0.0 {
+                ("det A = +1  →  proper (rotation)".to_string(), SAME)
+            } else {
+                ("det A = −1  →  improper (reflected)".to_string(), OPP)
+            },
+            (format!("Symmetry group G = {}   |G| = {}", s.group_name(), s.group.len()), TEXT),
+            if s.is_chiral() {
+                ("G has no reflections  →  CHIRAL".to_string(), OPP)
+            } else {
+                (format!("G has {} reflection(s)  →  ACHIRAL", s.mirror_line_angles().len()), SAME)
+            },
+            (format!("Chirality measure S = {:.2}   (0 = achiral)", s.ccm), TEXT),
+        ];
+        if !self.mirrors.is_empty() {
+            lines.push(("Mirror at angle θ:  M = [cos 2θ  sin 2θ ; sin 2θ  −cos 2θ]".to_string(), DIM));
+            lines.push(("det M = −1;  k reflections  →  det = (−1)^k".to_string(), DIM));
+        }
+        if self.copy_on {
+            let rel = self.copy.mat().determinant() * self.orig.mat().determinant();
+            lines.push((
+                format!("det(A_copy) · det(A_orig) = {}", pm1(rel)),
+                if rel < 0.0 { OPP } else { SAME },
+            ));
+        }
+        info_box("Mathematics", &lines);
     }
 
     pub fn sidebar(&mut self, ui: &mut Ui) {
@@ -624,14 +722,14 @@ impl App2D {
             let s = self.shape();
             (s.name, s.blurb, s.is_chiral(), s.rotation_order(), s.mirror_line_angles().len())
         };
-        ui.label(name, 22.0, TEXT);
+        ui.label(&format!("{} / {}  {}", self.cur + 1, self.shapes.len(), name), 20.0, TEXT);
         if chiral {
             ui.label("CHIRAL", 20.0, OPP);
         } else {
             ui.label("ACHIRAL", 20.0, SAME);
         }
-        ui.label(&format!("Rotation symmetry: {rot}-fold   Mirror lines: {lines}"), 16.0, DIM);
-        ui.wrapped(blurb, 16.0, DIM);
+        ui.label(&format!("Rotation: {rot}-fold   Mirror lines: {lines}"), 15.0, DIM);
+        ui.wrapped(blurb, 15.0, DIM);
         ui.space(4.0);
         ui.toggle("Show own symmetry lines [S]", &mut self.show_sym);
         ui.toggle("Show handedness arrows [A]", &mut self.show_arrows);
@@ -648,7 +746,7 @@ impl App2D {
             Some(2) => self.depth = (self.depth + 1).min(12),
             _ => {}
         }
-        ui.label("Presets:", 16.0, DIM);
+        ui.label("Presets:", 15.0, DIM);
         match ui.row(&["Single", "90 deg", "60 deg", "45 deg"], None) {
             Some(0) => self.preset_single(),
             Some(1) => self.preset_wedge(2),
@@ -665,7 +763,7 @@ impl App2D {
             }
             _ => {}
         }
-        ui.label(&format!("{} images visible", self.image_count.saturating_sub(1)), 16.0, DIM);
+        ui.label(&format!("{} images visible", self.image_count.saturating_sub(1)), 15.0, DIM);
 
         ui.heading("Superimpose challenge");
         let mut on = self.copy_on;
@@ -673,27 +771,22 @@ impl App2D {
         if on != self.copy_on {
             self.toggle_copy();
         }
-        if self.copy_on {
-            if ui.button("Reset copy") {
+        let sel = self.selected;
+        match ui.row(&["Flip through 3D [F]", "Reset copy"], None) {
+            Some(0) => self.flip(sel),
+            Some(1) => {
+                if !self.copy_on {
+                    self.toggle_copy();
+                }
                 self.place_copy();
             }
+            _ => {}
         }
 
         ui.heading("Legend");
         ui.swatch(SAME, "Same hand (even # of reflections)");
         ui.swatch(OPP, "Opposite hand (odd #) = enantiomorph");
         ui.swatch(COPY, "Your movable copy (outline)");
-
-        ui.heading("Controls");
-        for line in [
-            "Drag shape: move   Wheel / Q E: rotate",
-            "Drag knob: rotate (Shift snaps 15 deg)",
-            "Drag mirror ends / line: aim, move",
-            "F: flip selected   Tab / arrows: shape",
-            "+ / - : reflection bounces",
-        ] {
-            ui.label(line, 15.0, DIM);
-        }
     }
 }
 
